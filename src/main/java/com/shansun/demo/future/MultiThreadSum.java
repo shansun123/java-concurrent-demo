@@ -17,9 +17,9 @@ import com.google.common.util.concurrent.AtomicDouble;
  * @date: 2012-7-5
  */
 public class MultiThreadSum {
-	private static final int	CALC_TIMES	= 8;
+	protected static final int	CALC_TIMES	= 8;
 
-	private static final int	CONST		= 10000000;
+	protected static final int	CONST		= 10000000;
 
 	// static ListeningExecutorService service =
 	// MoreExecutors.listeningDecorator(Executors.newFixedThreadPool(20));
