@@ -10,13 +10,13 @@ import java.util.concurrent.LinkedBlockingQueue;
  * @version:    1.0  <br>
  * @date:   	2012-7-19
  */
-public class BlockingQueueDemo {
+public class LinkedBlockingQueueDemo {
 
 	/**
 	 * @param args
 	 */
 	public static void main(String[] args) {
-		BlockingQueue<Message> queue = new LinkedBlockingQueue<BlockingQueueDemo.Message>();
+		BlockingQueue<Message> queue = new LinkedBlockingQueue<LinkedBlockingQueueDemo.Message>();
 		Producer p = new Producer(queue);
 		Consumer c1 = new Consumer(queue);
 		Consumer c2 = new Consumer(queue);
