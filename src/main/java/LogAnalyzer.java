@@ -48,14 +48,24 @@ public class LogAnalyzer {
 	static class LogWithholdEntry extends LogEntry {
 		String	enough;
 	}
+	
+	static class LogReduceInfoEntry extends LogEntry {
+		String subId;
+		String itemId;
+		String skuId;
+		String reason = "";
+		int    lineCnt = 0;
+	}
 
 	static class LogFlusher implements Runnable {
 		BufferedWriter	reduceWriter	= null;
 		BufferedWriter	withholdWriter	= null;
+		 BufferedWriter	reduceInfoWriter= null;
 
 		public LogFlusher(String base) throws UnsupportedEncodingException, FileNotFoundException {
-			reduceWriter = new BufferedWriter(new OutputStreamWriter(new FileOutputStream(base + "reduce.csv"), "gb2312"));
-			withholdWriter = new BufferedWriter(new OutputStreamWriter(new FileOutputStream(base + "withhold.csv"), "gb2312"));
+			// reduceWriter = new BufferedWriter(new OutputStreamWriter(new FileOutputStream(base + "reduce.csv"), "gb2312"));
+			// withholdWriter = new BufferedWriter(new OutputStreamWriter(new FileOutputStream(base + "withhold.csv"), "gb2312"));
+			reduceInfoWriter = new BufferedWriter(new OutputStreamWriter(new FileOutputStream(base + "reduce-failure-2.csv"), "gb2312"));
 		}
 
 		public void start() {
@@ -82,15 +92,131 @@ public class LogAnalyzer {
 							LogReduceEntry re = (LogReduceEntry) entry;
 							reduceWriter.append(re.bizId + "," + re.subId + "," + re.time + "," + re.using + "," + re.succ + "\n");
 							reduceWriter.flush();
-						} else {
+						} else if(entry instanceof LogWithholdEntry) {
 							LogWithholdEntry we = (LogWithholdEntry) entry;
 							withholdWriter.append(we.bizId + "," + we.time + "," + we.using + "," + we.succ + "," + we.enough + "\n");
 							withholdWriter.flush();
+						} else {
+							LogReduceInfoEntry ri = (LogReduceInfoEntry) entry;
+							reduceInfoWriter.append(ri.time + "," + ri.bizId + "," + ri.subId + "," + ri.itemId + "," + ri.skuId + "," + ri.reason + "\n");
+							reduceInfoWriter.flush();
 						}
 					} catch (IOException e) {
 					}
 				}
 			}
+			
+			System.out.println("Analyzer Done!");
+		}
+	}
+	
+	static class ReduceAnalyzer {
+		BufferedReader	reader			= null;
+
+		String IC_HSF = "HSFTimeOutException";
+		String DB_EXCEPTION_1 = "NoMoreDataSourceException";
+		String DB_EXCEPTION_2 = "UncategorizedSQLException"; // Could not create connection; - nested throwable: (com.mysql.jdbc.exceptions.jdbc4.MySQLNonTransientConnectionException: Could not create connection to database server. Attempted reconnect 3 times. Giving up.); - nested throwable: (com.taobao.datasource.resource.JBossResourceException: Could not create connection; - nested throwable: (com.mysql.jdbc.exceptions.jdbc4.MySQLNonTransientConnectionException: Could not create connection to database server. Attempted reconnect 3 times. Giving up.)); nested exception is com.ibatis.common.jdbc.exception.NestedSQLException:   
+		String DB_EXCEPTION_3 = "DataAccessResourceFailureException";
+		String ITEM_NOT_ENOUGH = "IC_ITEM_QUANTITY_NOT_ENOUGH_FOR_BUY";
+		String QUERY_DETAIL_FAILURE = "查询库存明细纪录失败";
+		String ORDER_FINISH = "更新失败：完成状态更新库存明细失败";
+		String UPDATE_DETAIL_FAILURE = "更新库存明细失败";
+		String SKU_NOT_ENOUGH = "IC_SKU_QUANTITY_NOT_ENOUGH_FOR_BUY";
+		String INSERT_DTL_FAILURE = "插入库存明细失败";
+		String IC_ITEM_QUANTITY_OPTIMISTIC_LOCKING = "IC_ITEM_QUANTITY_OPTIMISTIC_LOCKING_FOR_BUY";
+		
+		String filepath	= null;
+		
+		public ReduceAnalyzer(String filepath) throws UnsupportedEncodingException, FileNotFoundException {
+			this.filepath = filepath;
+			reader = new BufferedReader(new InputStreamReader(new FileInputStream(filepath), "gb2312"));
+		}
+		
+		public void execute() throws IOException {
+			// 日志行
+			LogReduceInfoEntry entry = null;
+			boolean matched = false;
+
+			Pattern pattern = Pattern.compile("(\\d{4}-\\d{2}-\\d{1,2}) (\\d{1,2}:\\d{1,2}:\\d{1,2}) (.*? - reduceQuantityByBizOrderId减库存失败IpmException) 主订单=(\\d*),子订单=(\\d*),icItemId=(\\d*),skuId=(\\d*)(.*)");
+
+			// 日志内容行 
+			String line = reader.readLine(); 
+			while (line != null) { 
+				Matcher matcher = pattern.matcher(line);
+				if (matcher.find()) {					
+					if (matched) {
+						// 输出到文件
+						entries.add(entry);
+					}
+
+					entry = new LogReduceInfoEntry();
+					entry.time = matcher.group(2);
+					entry.bizId = matcher.group(4);
+					entry.subId = matcher.group(5);
+					entry.itemId = matcher.group(6);
+					entry.skuId = matcher.group(7); 
+
+					matched = match(entry, matched, line);
+				} else if (!matched) {
+					matched = match(entry, matched, line);
+				}
+ 
+				line = reader.readLine();
+			}
+			
+			System.out.println(filepath + ": Done!");
+			
+			reader.close(); 
+		}
+
+		public boolean match(LogReduceInfoEntry entry, boolean matched, String line) {
+			if(entry == null) {
+				return matched;
+			}
+			
+			if(line.contains(IC_HSF)) {
+				entry.reason = "IC_ERROR";
+				matched = true;
+			} else if(line.contains(DB_EXCEPTION_1)) {
+				entry.reason = DB_EXCEPTION_1;
+				matched = true;
+			} else if(line.contains(DB_EXCEPTION_2)) {
+				entry.reason = DB_EXCEPTION_2;
+				matched = true;
+			} else if(line.contains(DB_EXCEPTION_3)) {
+				entry.reason = DB_EXCEPTION_3;
+				matched = true;
+			} else if(line.contains(ITEM_NOT_ENOUGH)) {
+				entry.reason = "ITEM_NOT_ENOUGH";
+				matched = true;
+			} else if(line.contains(QUERY_DETAIL_FAILURE)) {
+				entry.reason = "QUERY_DTL_ERROR";
+				matched = true;
+			} else if(line.contains(ORDER_FINISH)) {
+				entry.reason = "ORDER_FINISH";
+				matched = true;
+			} else if(line.contains(UPDATE_DETAIL_FAILURE)) {
+				entry.reason = "UPDATE_DTL_FAILURE";
+				matched = true;
+			} else if(line.contains(SKU_NOT_ENOUGH)) {
+				entry.reason = "SKU_NOT_ENOUGH";
+				matched = true;
+			} else if(line.contains(INSERT_DTL_FAILURE)) {
+				entry.reason = "INSERT_DTL_FAILURE";
+				matched = true;
+			} else if(line.contains(IC_ITEM_QUANTITY_OPTIMISTIC_LOCKING)) {
+				entry.reason = "IC_ITEM_QUANTITY_OPTIMISTIC_LOCKING";
+				matched = true;
+			}  else {
+				if(entry.lineCnt < 2) {
+					entry.reason += line.replace(",", "[sp]").replace(" ", "");
+					entry.lineCnt++;
+					matched = false;
+				} else {
+					matched = true;
+				}
+			}
+			return matched;
 		}
 	}
 
@@ -182,7 +308,34 @@ public class LogAnalyzer {
 				}
 			}
 		}
+	}
+	
+	static class LogReduceTask implements Runnable {
+		private String	baseDir;
 
+		public LogReduceTask(String baseDir) {
+			this.baseDir = baseDir;
+		}
+		
+		@Override
+		public void run() {
+			threadCnt.incrementAndGet();
+			
+			while (true) {
+				String filename = files.poll();
+				if (filename == null) {
+					break;
+				}
+
+				try {
+					new ReduceAnalyzer(baseDir + seperator + filename).execute();
+				} catch (Exception e) {
+				}
+			}
+			
+			threadCnt.decrementAndGet();
+		}
+		
 	}
 
 	public static void main(String[] args) throws IOException {
@@ -207,12 +360,12 @@ public class LogAnalyzer {
 			}
 		}
 		
-		int cnt = 5;
+		int cnt = 1;
 		if(args.length > 1) {
 			cnt = Integer.valueOf(args[1]);
 		}
 		for (int i = 0; i < cnt; i++) {
-			new Thread(new LogFormatTask(folder.getAbsolutePath())).start();
+			new Thread(new LogReduceTask(folder.getAbsolutePath())).start();
 		}
 
 		File outputFolder = new File(folder.getAbsolutePath() + seperator + "csv" + seperator);
@@ -224,8 +377,8 @@ public class LogAnalyzer {
 	}
 
 	public static void regex() {
-		String log = "2012-11-11 11:00:40 WARN IPM-Trade - P1-WithholdInventory-Batch [172.24.63.71,tc-alipay,8ms] orderid=171446933883619 [T] ,Not-Enough";
-		String regex = "(\\d{4}-\\d{2}-\\d{1,2}) (\\d{1,2}:\\d{1,2}:\\d{1,2}) (.*? - P1-WithholdInventory-Batch .*?,tc-alipay,)(\\d{1,5})ms\\] orderid=(\\d*) \\[(T|F->.*)\\] ,(Enough|Not-Enough)";
+		String log = "2012-11-11 01:22:26 ERROR IPM-Trade - reduceQuantityByBizOrderId减库存失败IpmException 主订单=170949703384762,子订单=170949703384762,icItemId=13615333557,skuId=20964732381,com.taobao.inventory.client.exception.IpmException: ReducingInventoryExceptionIC_SKU_QUANTITY_NOT_ENOUGH_FOR_BUY";
+		String regex = "(\\d{4}-\\d{2}-\\d{1,2}) (\\d{1,2}:\\d{1,2}:\\d{1,2}) (.*? - reduceQuantityByBizOrderId减库存失败IpmException) 主订单=(\\d*),子订单=(\\d*),icItemId=(\\d*),skuId=(\\d*)(.*)";
 		Pattern pattern = Pattern.compile(regex);
 		Matcher matcher = pattern.matcher(log);
 		if (matcher.find()) {
