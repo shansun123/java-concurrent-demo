@@ -219,6 +219,7 @@ public class LogAnalyzer {
 			return matched;
 		}
 	}
+	
 
 	static class LogFormatter {
 		BufferedReader	reader			= null;
