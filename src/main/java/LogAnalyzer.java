@@ -34,7 +34,7 @@ public class LogAnalyzer {
 	private static String					seperator	= System.getProperty("file.separator");
 
 	static abstract class LogEntry {
-		String	bizId;
+		String	bizId = "";
 		String	time;
 		String	using;
 		String	succ;
@@ -56,16 +56,26 @@ public class LogAnalyzer {
 		String reason = "";
 		int    lineCnt = 0;
 	}
+	
+	static class LogFullWithholdEntry extends LogWithholdEntry {
+		String code = "";
+		String afterPayment = "";
+		String subId = "";
+		String itemId = "";
+		String quantity = "";
+	}
 
 	static class LogFlusher implements Runnable {
 		BufferedWriter	reduceWriter	= null;
 		BufferedWriter	withholdWriter	= null;
-		 BufferedWriter	reduceInfoWriter= null;
+		BufferedWriter	reduceInfoWriter= null;
+		BufferedWriter	fullWithholdWriter= null;
 
 		public LogFlusher(String base) throws UnsupportedEncodingException, FileNotFoundException {
 			// reduceWriter = new BufferedWriter(new OutputStreamWriter(new FileOutputStream(base + "reduce.csv"), "gb2312"));
 			// withholdWriter = new BufferedWriter(new OutputStreamWriter(new FileOutputStream(base + "withhold.csv"), "gb2312"));
-			reduceInfoWriter = new BufferedWriter(new OutputStreamWriter(new FileOutputStream(base + "reduce-failure-2.csv"), "gb2312"));
+			// reduceInfoWriter = new BufferedWriter(new OutputStreamWriter(new FileOutputStream(base + "reduce-failure-2.csv"), "gb2312"));
+			fullWithholdWriter = new BufferedWriter(new OutputStreamWriter(new FileOutputStream(base + "full-withhold.csv"), "gb2312"));
 		}
 
 		public void start() {
@@ -75,8 +85,16 @@ public class LogAnalyzer {
 		@Override
 		public void run() {
 			LogEntry entry = null;
+			
+			try {
+				Thread.sleep(3000);
+			} catch (InterruptedException e1) {
+				e1.printStackTrace();
+			}
+			
 			while (true) {
 				entry = entries.poll();
+				
 				if (entry == null) {
 					if (threadCnt.get() == 0) {
 						break;
@@ -92,11 +110,15 @@ public class LogAnalyzer {
 							LogReduceEntry re = (LogReduceEntry) entry;
 							reduceWriter.append(re.bizId + "," + re.subId + "," + re.time + "," + re.using + "," + re.succ + "\n");
 							reduceWriter.flush();
+						} else if(entry instanceof LogFullWithholdEntry) {
+							LogFullWithholdEntry fw = (LogFullWithholdEntry) entry;
+							fullWithholdWriter.append(fw.time + "," + fw.bizId + "," + fw.subId + "," + fw.itemId + "," + fw.afterPayment + "," + fw.succ + "," + fw.code + "\n");
+							fullWithholdWriter.flush();
 						} else if(entry instanceof LogWithholdEntry) {
 							LogWithholdEntry we = (LogWithholdEntry) entry;
 							withholdWriter.append(we.bizId + "," + we.time + "," + we.using + "," + we.succ + "," + we.enough + "\n");
 							withholdWriter.flush();
-						} else {
+						} else if(entry instanceof LogReduceInfoEntry) {
 							LogReduceInfoEntry ri = (LogReduceInfoEntry) entry;
 							reduceInfoWriter.append(ri.time + "," + ri.bizId + "," + ri.subId + "," + ri.itemId + "," + ri.skuId + "," + ri.reason + "\n");
 							reduceInfoWriter.flush();
@@ -232,6 +254,8 @@ public class LogAnalyzer {
 		Pattern			withholdRegex	= Pattern
 												.compile("(\\d{4}-\\d{2}-\\d{1,2}) (\\d{1,2}:\\d{1,2}:\\d{1,2}) (.*? - P1-WithholdInventory-Batch .*?,tc-alipay,)(\\d{1,5})ms\\] orderid=(\\d*) \\[(T|F->.*)\\] ,(Enough|Not-Enough)");
 
+		Pattern 		fullWithholdRegex = Pattern.compile("");
+		
 		public LogFormatter(String filepath) throws UnsupportedEncodingException, FileNotFoundException {
 			reader = new BufferedReader(new InputStreamReader(new FileInputStream(filepath), "gb2312"));
 		}
@@ -287,6 +311,85 @@ public class LogAnalyzer {
 
 	}
 
+	static class LogFullWithholdFormatter {
+		BufferedReader	reader			= null;
+
+		String			reduceKey		= "reduce";
+		String			withholdKey		= "withhold";
+
+		Pattern			batchWithholdRegex		= Pattern
+												.compile("(\\d{4}-\\d{2}-\\d{1,2}) (\\d{1,2}:\\d{1,2}:\\d{1,2}) (.*? - .*WithholdInventory-Batch.*?,.*,)(\\d{1,5})ms\\] orderid=(\\d*) \\[(T|F->.*)\\] ,Not-Enough");
+		Pattern			singleWithholdRegex	= Pattern
+												.compile("(\\d{4}-\\d{2}-\\d{1,2}) (\\d{1,2}:\\d{1,2}:\\d{1,2}) (.*? - .*WithholdInventory-Single.*?,.*,)(\\d{1,5})ms\\] suborderid=(\\d*),quantity=(\\d*),AfterPayment=(true|false),item=(\\d*) \\[(T|F->.*)\\] (.*),Not-Enough");
+
+		Pattern 		fullWithholdRegex = Pattern.compile("");
+		
+		public LogFullWithholdFormatter(String filepath) throws UnsupportedEncodingException, FileNotFoundException {
+			reader = new BufferedReader(new InputStreamReader(new FileInputStream(filepath), "gb2312"));
+		}
+
+		public void execute() {
+			threadCnt.incrementAndGet();
+
+			// 日志内容行
+			String line = null;
+			try {
+				line = reader.readLine();
+			} catch (IOException e1) {
+			}
+
+			while (line != null) {
+				Matcher matcher = batchWithholdRegex.matcher(line);
+
+				try {
+				if (matcher.find()) {
+					LogFullWithholdEntry entry = new LogFullWithholdEntry();
+					entry.time = matcher.group(2);
+					entry.bizId = matcher.group(5);
+					entry.succ = matcher.group(6).equals("T") + "";
+					// entry.enough = matcher.group(7).equals("Enough") + "";
+					entry.using = matcher.group(4);
+					if(!entry.succ.equals("true")) {
+						entry.code = matcher.group(6).substring(3);
+					}
+					entries.add(entry);
+				} else {
+					matcher = singleWithholdRegex.matcher(line);
+					if (matcher.find()) {
+						LogFullWithholdEntry entry = new LogFullWithholdEntry();
+						entry.time = matcher.group(2);
+						entry.using = matcher.group(4);
+						entry.subId = matcher.group(5);
+						entry.quantity = matcher.group(6);
+						entry.afterPayment = matcher.group(7);
+						entry.itemId = matcher.group(8);
+						String succ = matcher.group(9);
+						entry.succ = succ.equals("T") + "";
+						if(!entry.succ.equals("true")) {
+							entry.code = succ.substring(3, succ.indexOf("F->", 4));
+						}
+						entries.add(entry);
+					}
+				}
+				} catch(Exception e) {
+					e.printStackTrace();
+				}
+
+				try {
+					line = reader.readLine();
+				} catch (IOException e) {
+				}
+			}
+
+			try {
+				reader.close();
+			} catch (IOException e) {
+			}
+
+			threadCnt.decrementAndGet();
+		}
+	}
+	
 	static class LogFormatTask implements Runnable {
 
 		private String	baseDir;
@@ -305,6 +408,29 @@ public class LogAnalyzer {
 
 				try {
 					new LogFormatter(baseDir + seperator + filename).execute();
+				} catch (Exception e) {
+				}
+			}
+		}
+	}
+	
+	static class LogFullWithholdTask implements Runnable {
+		private String	baseDir;
+
+		public LogFullWithholdTask(String baseDir) {
+			this.baseDir = baseDir;
+		}
+
+		@Override
+		public void run() {
+			while (true) {
+				String filename = files.poll();
+				if (filename == null) {
+					break;
+				}
+
+				try {
+					new LogFullWithholdFormatter(baseDir + seperator + filename).execute();
 				} catch (Exception e) {
 				}
 			}
@@ -366,7 +492,7 @@ public class LogAnalyzer {
 			cnt = Integer.valueOf(args[1]);
 		}
 		for (int i = 0; i < cnt; i++) {
-			new Thread(new LogReduceTask(folder.getAbsolutePath())).start();
+			new Thread(new LogFullWithholdTask(folder.getAbsolutePath())).start();
 		}
 
 		File outputFolder = new File(folder.getAbsolutePath() + seperator + "csv" + seperator);
@@ -378,10 +504,14 @@ public class LogAnalyzer {
 	}
 
 	public static void regex() {
-		String log = "2012-11-11 01:22:26 ERROR IPM-Trade - reduceQuantityByBizOrderId减库存失败IpmException 主订单=170949703384762,子订单=170949703384762,icItemId=13615333557,skuId=20964732381,com.taobao.inventory.client.exception.IpmException: ReducingInventoryExceptionIC_SKU_QUANTITY_NOT_ENOUGH_FOR_BUY";
-		String regex = "(\\d{4}-\\d{2}-\\d{1,2}) (\\d{1,2}:\\d{1,2}:\\d{1,2}) (.*? - reduceQuantityByBizOrderId减库存失败IpmException) 主订单=(\\d*),子订单=(\\d*),icItemId=(\\d*),skuId=(\\d*)(.*)";
+		String log = "2012-11-11 00:20:11 WARN IPM-Trade - P1-WithholdInventory-Batch [172.23.230.184,tc-alipay,3008ms] orderid=194630958498828 [T] ,Not-Enough";
+		String log2 = "2012-11-11 00:20:07 WARN IPM-Trade - P1-WithholdInventory-Batch [172.24.168.109,tc-alipay,1016ms] orderid=194638954807578 [F->IP_ILLEGAL_INVENTORY_STATUS_Complete] ,Not-Enough";
+		String log3 = "2012-11-11 00:07:18 WARN IPM-Trade - P1-WithholdInventory-Batch-Buy [172.23.36.66,tmall_buy,10015ms] orderid=194654110384883 [T] ,Not-Enough";
+		String log4 = "2012-11-11 00:07:13 WARN IPM-Trade - P1-WithholdInventory-Single[172.23.180.55,tf,1ms] suborderid=246481681998782,quantity=1,AfterPayment=true,item=16269325560 [F->IP_QUERY_Inventory_Detail_ERRORF->IpmException查询预扣详情错误 子订单号：子订单号=246481681998782,itemId=16269325560] I->IpmException查询预扣详情错误 子订单号：子订单号=246481681998782,itemId=16269325560,Not-Enough,null";
+		String regex = "(\\d{4}-\\d{2}-\\d{1,2}) (\\d{1,2}:\\d{1,2}:\\d{1,2}) (.*? - .*WithholdInventory-Batch.*?,.*,)(\\d{1,5})ms\\] orderid=(\\d*) \\[(T|F->.*)\\] ,(Enough|Not-Enough)";
 		Pattern pattern = Pattern.compile(regex);
-		Matcher matcher = pattern.matcher(log);
+		Pattern pattern2 = Pattern.compile("(\\d{4}-\\d{2}-\\d{1,2}) (\\d{1,2}:\\d{1,2}:\\d{1,2}) (.*? - .*WithholdInventory-Single.*?,.*,)(\\d{1,5})ms\\] suborderid=(\\d*),quantity=(\\d*),AfterPayment=(true|false),item=(\\d*) \\[(T|F->.*)\\] (.*),(Enough|Not-Enough)");
+		Matcher matcher = pattern.matcher(log2);
 		if (matcher.find()) {
 			int groupCount = matcher.groupCount();
 			int i = 1;

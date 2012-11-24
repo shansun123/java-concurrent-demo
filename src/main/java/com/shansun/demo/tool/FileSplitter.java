@@ -26,8 +26,8 @@ public class FileSplitter {
 	 * @throws IOException
 	 */
 	public static void main(String[] args) throws IOException {
-		String filepath = "C:\\Users\\lanbo.xj\\Downloads\\reduce-failure.csv";
-		int splitCnt = 1;
+		String filepath = "D:\\alipay_gateway_result.csv";
+		int splitCnt = 2;
 
 		File file = new File(filepath);
 
@@ -75,20 +75,17 @@ public class FileSplitter {
 			if (cnt == 0) {
 				if(writer != null) writer.close();
 				
-				if(index == 3) {
-					break;
-				}
-				
 				outputFile = new File(output.replace("." + extension, "-" + index++ + "." + extension));
 				writer = Files.newWriter(outputFile, GBK);
 			}
 
-			writer.append("\"" + line.replace(",", "\",\"") + "\"");
+			writer.append(line);
 			writer.append(LINE_SEPERATOR);
 
 			cnt++;
 
 			if (cnt > eachSize) {
+				System.out.println("Fetched " + cnt + " Lines.");
 				cnt = 0;
 			}
 		}
