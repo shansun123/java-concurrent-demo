@@ -8,6 +8,7 @@ import java.util.concurrent.TimeUnit;
 
 /**
  * http://blog.csdn.net/hudashi/article/details/7076798
+ * http://www.cnblogs.com/jobs/archive/2007/04/27/730255.html
  * 
  * @author: lanbo <br>
  * @version: 1.0 <br>

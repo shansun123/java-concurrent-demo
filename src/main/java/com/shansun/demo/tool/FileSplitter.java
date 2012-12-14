@@ -26,8 +26,8 @@ public class FileSplitter {
 	 * @throws IOException
 	 */
 	public static void main(String[] args) throws IOException {
-		String filepath = "D:\\alipay_gateway_result.csv";
-		int splitCnt = 2;
+		String filepath = "C:\\Users\\lanbo.xj\\Desktop\\failover_1111.csv";
+		int splitCnt = 3;
 
 		File file = new File(filepath);
 
